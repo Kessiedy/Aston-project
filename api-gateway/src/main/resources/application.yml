@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: api-gateway
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:default}
+
   cloud:
     gateway:
       discovery:
@@ -11,7 +15,6 @@ spring:
           enabled: true
           lower-case-service-id: true
       routes:
-        # User Service Routes
         - id: user-service
           uri: lb://user-service
           predicates:
@@ -26,13 +29,7 @@ spring:
                 retries: 3
                 statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE
                 methods: GET,POST,PUT,DELETE
-                backoff:
-                  firstBackoff: 50ms
-                  maxBackoff: 500ms
-                  factor: 2
-                  basedOnPreviousValue: false
 
-        # Notification Service Routes
         - id: notification-service
           uri: lb://notification-service
           predicates:
@@ -42,77 +39,47 @@ spring:
               args:
                 name: notificationServiceCircuitBreaker
                 fallbackUri: forward:/fallback/notification-service
-            - name: Retry
-              args:
-                retries: 2
-                statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE
-                methods: GET,POST
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
 
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: http://eureka-server:8761/eureka/
+    fetch-registry: true
+    register-with-eureka: true
   instance:
     prefer-ip-address: true
+    hostname: api-gateway
+    lease-renewal-interval-in-seconds: 10
 
-# Resilience4j Circuit Breaker Configuration
 resilience4j:
   circuitbreaker:
-    configs:
-      default:
-        sliding-window-type: COUNT_BASED
-        sliding-window-size: 10
-        minimum-number-of-calls: 5
-        permitted-number-of-calls-in-half-open-state: 3
-        automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      userServiceCircuitBreaker:
+        sliding-window-size: 5
+        minimum-number-of-calls: 3
+        failure-rate-threshold: 50
         wait-duration-in-open-state: 10s
-        failure-rate-threshold: 50
-        slow-call-rate-threshold: 100
-        slow-call-duration-threshold: 2s
-        record-exceptions:
-          - org.springframework.web.client.HttpServerErrorException
-          - java.io.IOException
-          - java.util.concurrent.TimeoutException
-          - org.springframework.web.client.ResourceAccessException
-    instances:
-      userServiceCircuitBreaker:
-        base-config: default
+      notificationServiceCircuitBreaker:
         sliding-window-size: 5
         minimum-number-of-calls: 3
         failure-rate-threshold: 50
-      notificationServiceCircuitBreaker:
-        base-config: default
-        sliding-window-size: 5
-        minimum-number-of-calls: 3
-
-  timelimiter:
-    configs:
-      default:
-        timeout-duration: 5s
-    instances:
-      userServiceCircuitBreaker:
-        timeout-duration: 3s
-      notificationServiceCircuitBreaker:
-        timeout-duration: 3s
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,circuitbreakers,circuitbreakerevents
+        include: health,info,metrics,circuitbreakers
   endpoint:
     health:
       show-details: always
-  health:
-    circuitbreakers:
-      enabled: true
-  metrics:
-    export:
-      prometheus:
-        enabled: false
 
 logging:
   level:
     root: INFO
     org.springframework.cloud.gateway: DEBUG
-    io.github.resilience4j: DEBUG
